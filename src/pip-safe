@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+### pip-safe VENV OPTIONS  ... Usage:help
+#
+# A molly-guard to prevent running pip in the host environment.
+#
+# pip-safe VENV run COMMAND ...
+#   run a command in the specified virtualenv
+# 
+# pip-safe VENV shell
+#   activate the virtualenv, and open a shell
+#   `deactivate` is available here to remove the virtualenv layer
+#
+# pip-safe VENV PIPCOMMAND ...
+#   run a normal pip command
+#   e.g. pip-safe ./myvenv install awscli
+#
+###/doc
+
+#%include app/pyvenv.sh
+#%include std/askuser.sh
+#%include std/out.sh
+#%include std/autohelp.sh
+
+$%function pips:ensure(venv_path) {
+    if [[ ! -f "$venv_path/pip-selfcheck.json" ]]; then
+        if askuser:confirm "<$venv_path> is not a virtual environment - set one up?"; then
+            pyvenv:setup "$venv_path"
+        else
+            out:fail "-- abort --"
+        fi
+    fi
+}
+
+$%function pips:main(venv_path command) {
+    pips:ensure "$venv_path"
+
+    pyvenv:activate "$venv_path"
+
+    if [[ "$command" = run ]]; then
+        "$@"
+    elif [[ "$command" = shell ]]; then
+        exec bash
+    else
+        pip "$@"
+    fi
+
+    pyvenv:deactivate
+}
+
+autohelp:check "$@"
+pips:main "$@"
