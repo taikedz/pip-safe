@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+### pipsy COMMAND [OPTIONS  ...] Usage:help
+#
+# A molly-guard to prevent running pip in the host environment.
+#
+# Set a default virtual environment for pipsy, and it will be used for any pipsy command.
+#
+# pipsy set VENVNAME
+#   Set a virtual env name for subsequent pipsy executions.
+#
+# pipsy ls
+#   List available environments
+#
+# pipsy which
+#   Print currently defaulted environment
+#
+# The run any pip commands you normally would like
+#
+# pipsy install youtube-dl
+#   Install the "youtube-dl" pip package
+#
+# Or, the special actions
+#
+# pipsy run COMMAND [ARGUMENTS ...]
+#   Run a command that was installed in the virtualenv
+#
+#   pipsy run youtube-dl ...
+#
+###/doc
+
+#%include app/pyvenv.sh
+#%include std/askuser.sh
+#%include std/out.sh
+#%include std/autohelp.sh
+
+VENVSTORE="$HOME/.local/lib/pipsy"
+
+$%function pips:ensure(*venv_path) {
+    [[ ! "$venv_path" =~ ^/ ]] || out:fail "virutalenv name <$venv_path> cannot be an absolute path."
+    venv_path="$VENVSTORE/$venv_path"
+
+    if [[ ! -f "$venv_path/pip-selfcheck.json" ]]; then
+        if askuser:confirm "<$venv_path> is not a virtual environment - set one up?"; then
+            mkdir -p "$venv_path"
+            pyvenv:setup "$venv_path"
+        else
+            out:fail "-- abort --"
+        fi
+    fi
+}
+
+pips:print_current_venv() {
+    if [[ -f "$VENVSTORE/default_venv" ]]; then
+        echo "Target virtualenv is $(cat "$VENVSTORE/default_venv")"
+    else
+        out:warn "No default virtualenv configured."
+    fi
+}
+
+$%function pips:command_precheck(command *venv_var) {
+    [[ -d "$VENVSTORE" ]] || mkdir -p "$VENVSTORE"
+
+    if [[ "$command" = set ]]; then
+        venv_var="$1"
+        venv_name="$1"
+        pips:ensure venv_var
+        echo "$venv_name" > "$VENVSTORE/default_venv"
+        exit
+
+    elif [[ "$command" =~ ^(list|ls)$ ]]; then
+        (ls "$VENVSTORE" | grep -v default_venv) || :
+        exit
+
+    elif [[ "$command" = which ]]; then
+        pips:print_current_venv
+        exit
+
+    else
+        venv_var=default
+    fi
+}
+
+$%function pips:load_default_venv(*venv_var) {
+    if [[ -f "$VENVSTORE/default_venv" ]]; then
+        venv_var="$(cat "$VENVSTORE/default_venv")"
+        VENV_NAME="$venv_var"
+        pips:ensure venv_var
+    else
+        out:fail "You must set a default virtualenv - see 'pipsy set VENVNAME'"
+    fi
+}
+
+$%function pips:in-venv-actions(venv) {
+    pyvenv:activate "$venv"
+
+    out:info "Loaded virtualenv <$VENV_NAME>"
+
+    if [[ "$command" = run ]]; then
+        "$@"
+
+    else
+        pip "$command" "$@"
+
+    fi
+
+    pyvenv:deactivate
+}
+
+$%function pips:main(command) {
+    local venv
+
+    out:info "You are running pipsy"
+
+    # Check if we are setting an overall virtualenv
+    # If so, it will be set, and script will exit here
+    pips:command_precheck "$command" venv "$@"
+
+    # Check if there is a default venv file, and load it
+    # If not, script will abort
+    pips:load_default_venv venv
+
+    # Actions that depend on an existin venv, taken care of prior
+    pips:in-venv-actions "$venv" "$@"
+}
+
+autohelp:check-or-null "$@"
+pips:main "$@"
