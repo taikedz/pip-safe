@@ -8,26 +8,31 @@ set -euo pipefail
 #
 # Set a default virtual environment for pipsy, and it will be used for any pipsy command.
 #
-# pipsy set VENVNAME
+# The following are the special pipsy commands:
+#
+#   /ls /cv /set /rm /run
+#
+# pipsy /set VENVNAME
 #   Set a virtual env name for subsequent pipsy executions.
 #
-# pipsy ls
+# pipsy /ls
 #   List available environments
 #
-# pipsy which
-#   Print currently defaulted environment
+# pipsy /cv
+#   Print current virtual environment
 #
-# The run any pip commands you normally would like
+# pipsy /rm VENVNAME
+#   Remove an existing virtual environment
+#
+# pipsy /run COMMAND [ARGUMENTS ...]
+#   Run a command that was installed in the virtualenv
+#
+#   pipsy /run youtube-dl ...
+#
+# Otherwise, run any pip commands you normally would, like
 #
 # pipsy install youtube-dl
 #   Install the "youtube-dl" pip package
-#
-# Or, the special actions
-#
-# pipsy run COMMAND [ARGUMENTS ...]
-#   Run a command that was installed in the virtualenv
-#
-#   pipsy run youtube-dl ...
 #
 ###/doc
 
@@ -37,6 +42,8 @@ set -euo pipefail
 #%include std/autohelp.sh
 
 VENVSTORE="$HOME/.local/lib/pipsy"
+VERSIONFILE="$VENVSTORE/python_version"
+DEFAULTFILE="$VENVSTORE/default_venv"
 
 $%function pips:ensure(*venv_path) {
     [[ ! "$venv_path" =~ ^/ ]] || out:fail "virutalenv name <$venv_path> cannot be an absolute path."
@@ -45,7 +52,7 @@ $%function pips:ensure(*venv_path) {
     if [[ ! -f "$venv_path/pip-selfcheck.json" ]]; then
         if askuser:confirm "<$venv_path> is not a virtual environment - set one up?"; then
             mkdir -p "$venv_path"
-            pyvenv:setup "$venv_path"
+            pyvenv:setup "$venv_path" "$PYTHONCMD"
         else
             out:fail "-- abort --"
         fi
@@ -53,8 +60,8 @@ $%function pips:ensure(*venv_path) {
 }
 
 pips:print_current_venv() {
-    if [[ -f "$VENVSTORE/default_venv" ]]; then
-        echo "Target virtualenv is $(cat "$VENVSTORE/default_venv")"
+    if [[ -f "$DEFAULTFILE" ]]; then
+        echo "Target virtualenv is $(cat "$DEFAULTFILE")"
     else
         out:warn "No default virtualenv configured."
     fi
@@ -63,24 +70,44 @@ pips:print_current_venv() {
 $%function pips:command_precheck(command *venv_var) {
     [[ -d "$VENVSTORE" ]] || mkdir -p "$VENVSTORE"
 
-    if [[ "$command" = set ]]; then
+    pips:load_python_version
+
+    if [[ "$command" = /set ]]; then
         venv_var="$1"
         venv_name="$1"
         pips:ensure venv_var
-        echo "$venv_name" > "$VENVSTORE/default_venv"
+        echo "$venv_name" > "$DEFAULTFILE"
         exit
 
-    elif [[ "$command" =~ ^(list|ls)$ ]]; then
+    elif [[ "$command" =~ ^/(list|ls)$ ]]; then
         (ls "$VENVSTORE" | grep -v default_venv) || :
         exit
 
-    elif [[ "$command" = which ]]; then
+    elif [[ "$command" = /cv ]]; then
         pips:print_current_venv
+        exit
+
+    elif [[ "$command" = /rm ]]; then
+        [[ -n "${1:-}" ]] || out:fail "Please specify a venv to remove"
+        if [[ -d "$VENVSTORE/$1" ]]; then
+            rm -rf "$VENVSTORE/$1" || out:fail "- abort -"
+            out:info "Removed <$1>"
+        else
+            out:warn "<$1> is not an existing virtual env"
+        fi
         exit
 
     else
         venv_var=default
     fi
+}
+
+pips:load_python_version() {
+    if [[ ! -f "$VERSIONFILE" ]]; then
+        echo "python3" > "$VERSIONFILE"
+    fi
+
+    PYTHONCMD="$(cat "$VERSIONFILE")"
 }
 
 $%function pips:load_default_venv(*venv_var) {
@@ -98,7 +125,7 @@ $%function pips:in-venv-actions(venv) {
 
     out:info "Loaded virtualenv <$VENV_NAME>"
 
-    if [[ "$command" = run ]]; then
+    if [[ "$command" = /run ]]; then
         "$@"
 
     else
@@ -122,7 +149,7 @@ $%function pips:main(command) {
     # If not, script will abort
     pips:load_default_venv venv
 
-    # Actions that depend on an existin venv, taken care of prior
+    # Actions that depend on an existing venv, taken care of prior
     pips:in-venv-actions "$venv" "$@"
 }
 
